@@ -16,3 +16,7 @@ python chinaixv_crawl.py
     "author": "xxx"     //作者信息
 }
 ```
+
+## Headers
+- 必需使用瀏覽器的最新版本才能進行爬蟲
+- 加入按 time_link 的進度持久化 （待辦）
