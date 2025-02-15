@@ -6,21 +6,22 @@ import jsonlines
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 import json
-TIME_INTERVAL = 0.1
+TIME_INTERVAL = 5
 
 def get_html_from_url(url):
-    time.sleep(TIME_INTERVAL)
+
     headers = {
         # "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.6943.99 Safari/537.36",
         "User-Agent":"Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
         "DNT": "1",  # Do Not Track Request Header
-        "Connection": "keep-alive"
+        # "Cookies":'JSESSIONID=4A4E9E34461F6BAB8360A3274A64A483; Hm_lvt_e0ffa85682c12db0afd8f95090cd9c7e=1737854413,1739257298,1739372401,1739589385; HMACCOUNT=7FB98E0B1A29A254; Hm_lpvt_e0ffa85682c12db0afd8f95090cd9c7e=1739590002',
+        "Connection": "keep-alive",
     }
     response = requests.get(url, headers=headers)
-
+    time.sleep(TIME_INTERVAL)
     # 确保请求成功
     if response.status_code == 200:
         # 获取页面HTML内容
@@ -142,25 +143,39 @@ def get_start_url(html_text, raw_url):
     traverse_url = re.sub(r'(Page=)\d+', r'\g<1>{}'.format(new_current_page), new_url)
     return traverse_url, last_page_value
 
-def traverse_category_link(url):
-    pdf_links = []
-    match = re.search(r'pageId=(\d+)', url)
-    if match:
-        pageId = match.group(1)
-    page_text = get_html_from_url(url)
+# def traverse_category_link(url):
+#     pdf_links = []
+#     match = re.search(r'pageId=(\d+)', url)
+#     if match:
+#         pageId = match.group(1)
+#     page_text = get_html_from_url(url)
 
+#     traverse_url, page_nums = get_start_url(page_text, url)
+#     page_nums = int(page_nums)
+#     ##
+#     page_nums = 2
+#     for idx in tqdm(range(page_nums)):
+#         print(f"{idx}/{page_nums}")
+#         traverse_url = re.sub(r'(Page=)\d+', r'\g<1>{}'.format(idx), traverse_url)
+#         page_text = get_html_from_url(traverse_url)
+#         yield get_download_link(page_text)
+#         # if not chinaxiv_empty(page_text):
+#         #     pdf_links += get_download_link(page_text)
+#         # else:
+#         #     return pdf_links
+        
+#     return pdf_links
+
+def process_time_link(url):
+    page_text = get_html_from_url(url)
     traverse_url, page_nums = get_start_url(page_text, url)
     page_nums = int(page_nums)
-    for idx in tqdm(range(page_nums)):
-        print(f"{idx}/{page_nums}")
-        traverse_url = re.sub(r'(Page=)\d+', r'\g<1>{}'.format(idx), traverse_url)
-        page_text = get_html_from_url(traverse_url)
-        if not chinaxiv_empty(page_text):
-            pdf_links += get_download_link(page_text)
-        else:
-            return pdf_links
-        
-    return pdf_links
+    return page_nums
+
+def process_single_page(url, page_num):
+    url = re.sub(r'(Page=)\d+', r'\g<1>{}'.format(page_num), url)
+    page_text = get_html_from_url(url)
+    return get_download_link(page_text)
 
 def save_stage_link_res(links, file_name):
     with open(f"{file_name}", "w") as f:
@@ -171,7 +186,7 @@ def save_stage_link_res(links, file_name):
 def save_stage_link_jsonl(links, file_name):
     with open(f"{file_name}", "w") as f:
         for link in links:
-            json.dump({'url': link, 'done': False}, f)
+            json.dump({'url': link, 'done': False, 'page':None, 'total_page':None}, f)
             f.write('\n')
 
 def load_links(file_name):
@@ -187,19 +202,23 @@ def load_jsonl(file_name):
     with jsonlines.open(f"./{file_name}", "r") as reader:
         link_objs = [obj for obj in reader]
     return link_objs
-def save_pdf_res(file_name, item):
-    with jsonlines.open(f"{file_name}", "w") as writer:
-        writer.write(item)
+def save_pdf_res(file_name, items):
+    with jsonlines.open(f"{file_name}", "a") as writer:
+        for item in items:
+            writer.write(item)
 
-def update_jsonl(file, index):
+def update_jsonl(file, index,done, page, total_page=None):
     # Read all lines
     with open(file, 'r') as f:
         lines = f.readlines()
-    
+
     # Update the specific line
     if 0 <= index < len(lines):
         data = json.loads(lines[index])
-        data['done'] = True
+        data['done'] = done
+        data['page'] = page
+        if total_page != None:
+            data['total_page'] = total_page
         lines[index] = json.dumps(data) + '\n'
     
     # Write back all lines
@@ -219,31 +238,44 @@ if __name__ == "__main__":
 
     
     time_links_files = os.listdir("./time_links")
-
+    ###### testing mode######
+    # cate_links  = cate_links[0:2]
+    # if len(time_links_files)> 2:
+    #     time_links_files = time_links_files[0:2]
+    ###### Tesintg ###########
     if len(time_links_files) != len(cate_links):
         for idx, link in enumerate(cate_links):
-            html_text = get_html_from_url(link)
+            html_text = get_html_from_url(link.replace('\n',''))
             time_links = get_time_link(html_text)
             save_stage_link_jsonl(time_links, f"./time_links/chinaxiv_time_link_{idx}.jsonl")
     
     time_links_files = os.listdir("./time_links")
 
+    # Scrap no of page 
     for idx, file in tqdm(enumerate(time_links_files), total=len(time_links_files)):
         time_links = load_jsonl(f"./time_links/{file}")
 
-        #final
-
-        for i,link in enumerate(time_links):
-            print(link['url'])
-            if link['url'] is None or (len(link['url']) < 5) or (link['done'] == True):
+        for i,link_obj in enumerate(time_links):
+            if link_obj['url'] is None or (len(link_obj['url']) < 5) or (link_obj['total_page']!=None):
                 break
-                
-            tmp = traverse_category_link(link['url'])
-            print(tmp)
-            if tmp is not None:
-                save_pdf_res(f"./pdf_links/pdf_links_{idx}.jsonl", tmp)
-                update_jsonl(f"./time_links/{file}",i)
+            page_num = process_time_link(link['url'])
+            update_jsonl(f"./time_links/{file}",i, done=False, page=0, total_page=page_num)
 
-
-
-
+    print("Start scrapping single page")
+    # Scraping page
+    for idx, file in tqdm(enumerate(time_links_files), total=len(time_links_files)):
+        time_links = load_jsonl(f"./time_links/{file}")
+        for i,link_obj in enumerate(time_links):
+            last_page = link_obj['page']
+            total_page = link_obj['total_page']
+            url = link_obj['url']
+            done = link_obj['done']
+            if done == False:
+                for current_page in range(last_page, total_page):
+                    pdf_links = process_single_page(url, current_page)
+                    if len(pdf_links) >0:
+                        save_pdf_res(f"./pdf_links/pdf_links_{idx}.jsonl", pdf_links)
+                        current_page+=1
+                        if current_page > total_page:
+                            done= True
+                        update_jsonl(f"./time_links/{file}",i, done=done, page=current_page)
